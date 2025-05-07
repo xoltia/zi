@@ -86,13 +86,12 @@ pub fn main() !void {
     switch (subcommand.?) {
         .ls => try listZigVersions(allocator, stdout, local_flag, remote_flag),
         .install => {
-            // if (positional == null) {
-            //     try stderr.writeAll("zi: No version provided\n");
-            //     try stderr.writeAll("See 'zi --help' for more information.\n");
-            //     return;
-            // }
+            if (positional == null) {
+                try stderr.writeAll("zi: No version provided\n");
+                try stderr.writeAll("See 'zi --help' for more information.\n");
+                return;
+            }
             // try installZigVersion(allocator, stdout, positional.?);
-            return error.NotImplemented;
         },
     }
 }

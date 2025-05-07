@@ -237,3 +237,74 @@ const DecompressReader = union(enum) {
         }
     }
 };
+
+const ZlsVersion = union(enum) {
+    tagged: []const u8,
+    master: void,
+};
+
+pub fn downloadZls(
+    allocator: std.mem.Allocator,
+    client: *std.http.Client,
+    version: ZlsVersion,
+    target_dir: std.fs.Dir,
+) !void {
+    _ = allocator;
+    _ = client;
+    _ = version;
+    _ = target_dir;
+    // const source = version.getNativeSource() orelse return error.NoSourceForVersion;
+    // const source_uri = try std.Uri.parse(source.tarball);
+    // try downloadAndExtract(allocator, client, source_uri, target_dir, null);
+}
+
+pub const ZlsRelease = struct {
+    tag_name: []const u8,
+    assets: []Asset,
+
+    pub fn getNativeAsset(self: @This()) ?Asset {
+        const possible_exts = [_][]const u8{ ".zip", ".tar", ".tar.xz", ".tar.gz" };
+        const possible_arch = switch (builtin.cpu.arch) {
+            .aarch64 => [_][]const u8{"aarch64"},
+            .loongarch64 => [_][]const u8{"loongarch64"},
+            .powerpc64le => [_][]const u8{"powerpc64le"},
+            .riscv64 => [_][]const u8{"riscv64"},
+            .x86 => [_][]const u8{ "x86", "i386" },
+            .x86_64 => [_][]const u8{"x86_64"},
+            else => @compileError("unsupported arch"),
+        };
+        const os_str = switch (builtin.os.tag) {
+            .windows => "windows",
+            .linux => "linux",
+            .macos => "maxos",
+        };
+    }
+
+    const Asset = struct {
+        url: []const u8,
+        size: u64,
+        name: []const u8,
+    };
+};
+
+/// Fetches the zls versions from the Github releases API.
+pub fn fetchZlsVersions(
+    allocator: std.mem.Allocator,
+    client: *std.http.Client,
+) !std.json.Parsed([]ZlsRelease) {
+    var response_body = std.ArrayList(u8).init(allocator);
+    defer response_body.deinit();
+
+    const response = try client.fetch(.{
+        .method = .GET,
+        .location = .{ .url = zls_releases_url },
+        .response_storage = .{ .dynamic = &response_body },
+    });
+
+    if (response.status != .ok) return error.StatusNotOk;
+
+    return std.json.parseFromSlice([]ZlsRelease, allocator, response_body.items, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+}
