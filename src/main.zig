@@ -49,6 +49,8 @@ pub fn main() !void {
     var reading_positional = false;
     var positional: ?[]const u8 = null;
 
+    defer if (positional) |str| allocator.free(str);
+
     for (args[1..]) |arg| {
         if (reading_positional) {
             positional = try allocator.dupe(u8, arg);
@@ -91,9 +93,36 @@ pub fn main() !void {
                 try stderr.writeAll("See 'zi --help' for more information.\n");
                 return;
             }
-            // try installZigVersion(allocator, stdout, positional.?);
+            try installZigVersion(allocator, stdout, positional.?);
         },
     }
+}
+
+fn installZigVersion(
+    allocator: std.mem.Allocator,
+    stdout: std.io.AnyWriter,
+    version_str: []const u8,
+) !void {
+    if (std.mem.eql(u8, version_str, "master"))
+        return error.NotImplemented;
+
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    var versions = try zi.remote.fetchZigVersions(allocator, &client);
+    defer versions.deinit();
+
+    const version = versions.value.map.get(version_str) orelse {
+        try stdout.writeAll("Version not found in index.\n");
+        try stdout.writeAll("See 'zi ls --remote' for a list of available versions.\n");
+        return;
+    };
+
+    var install_dir = try zi.local.makeOpenInstallDir(allocator, version_str, .{ .iterate = true });
+    defer install_dir.close();
+    try zi.remote.downloadZig(allocator, &client, version, install_dir);
+    const location = try zi.local.locateExecutables(allocator, install_dir);
+    defer location.deinit(allocator);
+    std.debug.print("{s}\n", .{location.zig});
 }
 
 fn listZigVersions(

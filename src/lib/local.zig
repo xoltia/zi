@@ -7,8 +7,7 @@ pub const ExecutablePaths = struct {
 
     pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
         allocator.free(self.zig);
-        if (self.zls_executable_path) |zls|
-            allocator.free(zls);
+        if (self.zls) |zls| allocator.free(zls);
     }
 };
 
@@ -62,10 +61,10 @@ pub fn makeOpenInstallDir(
     allocator: std.mem.Allocator,
     version_str: []const u8,
     flags: std.fs.Dir.OpenOptions,
-) std.fs.Dir {
+) !std.fs.Dir {
     const parent_dir = try baseInstallDir(allocator);
     defer allocator.free(parent_dir);
-    const full_path = std.fs.path.join(allocator, &[_][]const u8{ parent_dir, version_str });
+    const full_path = try std.fs.path.join(allocator, &[_][]const u8{ parent_dir, version_str });
     defer allocator.free(full_path);
     return std.fs.cwd().makeOpenPath(full_path, flags);
 }
@@ -97,7 +96,7 @@ pub fn locateExecutables(allocator: std.mem.Allocator, dir: std.fs.Dir) !Executa
         const executable = try isExecutableZ(dir, entry.path);
         if (!executable) continue;
 
-        const full_path = std.fs.path.join(allocator, &[_][]const u8{ base_path, entry.path });
+        const full_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, entry.path });
         if (is_zig)
             zig_exe_path = full_path
         else
@@ -149,5 +148,5 @@ fn isExecutableZ(dir: std.fs.Dir, path: [:0]const u8) !bool {
     const file = try dir.openFileZ(path, .{});
     defer file.close();
     const stat = try file.stat();
-    return (stat.mode & std.posix.S.IXUSR) == 1;
+    return stat.mode & std.posix.S.IXUSR != 0;
 }
