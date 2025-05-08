@@ -103,9 +103,6 @@ fn installZigVersion(
     stdout: std.io.AnyWriter,
     version_str: []const u8,
 ) !void {
-    if (std.mem.eql(u8, version_str, "master"))
-        return error.NotImplemented;
-
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
     var versions = try zi.remote.fetchZigVersions(allocator, &client);
@@ -117,12 +114,23 @@ fn installZigVersion(
         return;
     };
 
-    var install_dir = try zi.local.makeOpenInstallDir(allocator, version_str, .{ .iterate = true });
+    var install_dir = zi.local.openInstallDir(version_str, .{ .iterate = true }) catch |err| blk: {
+        if (err != error.FileNotFound) return err;
+        const new_dir = try zi.local.makeOpenInstallDir(version_str, .{ .iterate = true });
+        try zi.remote.downloadZig(allocator, &client, version, new_dir);
+        break :blk new_dir;
+    };
     defer install_dir.close();
-    try zi.remote.downloadZig(allocator, &client, version, install_dir);
-    const location = try zi.local.locateExecutables(allocator, install_dir);
-    defer location.deinit(allocator);
-    std.debug.print("{s}\n", .{location.zig});
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    const arena_allocator = arena.allocator();
+    defer arena.deinit();
+
+    const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
+    const location = try zi.local.locateExecutables(arena_allocator, install_dir);
+    const link_dir = try zi.local.linkDir(arena_allocator);
+    const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
+    try std.fs.cwd().atomicSymLink(location.zig, link_path, .{ .is_directory = false });
 }
 
 fn listZigVersions(

@@ -56,17 +56,23 @@ pub fn iterateInstalledVersions(allocator: std.mem.Allocator) !VersionIterator {
     };
 }
 
+pub fn openInstallDir(version_str: []const u8, flags: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    var buff: [std.fs.max_path_bytes]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buff);
+    const install_path = try baseInstallDir(fba.allocator());
+    var install_dir = try std.fs.cwd().openDir(install_path, .{});
+    defer install_dir.close();
+    return install_dir.openDir(version_str, flags);
+}
+
 /// Open an existing install directory or create a new one for a given version string.
-pub fn makeOpenInstallDir(
-    allocator: std.mem.Allocator,
-    version_str: []const u8,
-    flags: std.fs.Dir.OpenOptions,
-) !std.fs.Dir {
-    const parent_dir = try baseInstallDir(allocator);
-    defer allocator.free(parent_dir);
-    const full_path = try std.fs.path.join(allocator, &[_][]const u8{ parent_dir, version_str });
-    defer allocator.free(full_path);
-    return std.fs.cwd().makeOpenPath(full_path, flags);
+pub fn makeOpenInstallDir(version_str: []const u8, flags: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    var buff: [std.fs.max_path_bytes]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buff);
+    const install_path = try baseInstallDir(fba.allocator());
+    var install_dir = try std.fs.cwd().openDir(install_path, .{});
+    defer install_dir.close();
+    return install_dir.makeOpenPath(version_str, flags);
 }
 
 /// Get the executable paths from a version directory.
