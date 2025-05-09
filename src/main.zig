@@ -19,6 +19,9 @@ const help_text =
     \\    -r, --remote         List only remote versions
     \\    -l, --local          List only local versions
     \\
+    \\Flags for `install` subcommand:
+    \\    -f, --force          Remove the existing download if it exists
+    \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
     \\Environment variables:
     \\    ZI_INSTALL_DIR       Directory to install Zig versions (default: $HOME/.zi)
     \\    ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)
@@ -42,9 +45,11 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer().any();
 
     // TODO: In the future more than one flag can be passed.
-    // This shouuld be made more flexible.
+    // This should be made more flexible.
     var local_flag = false;
     var remote_flag = false;
+    var skip_zls_flag = false;
+    var force_flag = false;
     var subcommand: ?Subcommand = null;
     var reading_positional = false;
     var positional: ?[]const u8 = null;
@@ -67,6 +72,10 @@ pub fn main() !void {
             local_flag = true;
         } else if (std.mem.eql(u8, arg, "--remote") or std.mem.eql(u8, arg, "-r")) {
             remote_flag = true;
+        } else if (std.mem.eql(u8, arg, "--skip-zls") or std.mem.eql(u8, arg, "-s")) {
+            skip_zls_flag = true;
+        } else if (std.mem.eql(u8, arg, "--force") or std.mem.eql(u8, arg, "-f")) {
+            force_flag = true;
         } else if (std.mem.eql(u8, arg, "ls") and subcommand == null) {
             subcommand = .ls;
         } else if (std.mem.eql(u8, arg, "install") and subcommand == null) {
@@ -93,15 +102,17 @@ pub fn main() !void {
                 try stderr.writeAll("See 'zi --help' for more information.\n");
                 return;
             }
-            try installZigVersion(allocator, stdout, positional.?);
+            try installZigVersion(allocator, stderr, positional.?, force_flag, skip_zls_flag);
         },
     }
 }
 
 fn installZigVersion(
     allocator: std.mem.Allocator,
-    stdout: std.io.AnyWriter,
+    stderr: std.io.AnyWriter,
     version_str: []const u8,
+    force: bool,
+    skip_zls: bool,
 ) !void {
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
@@ -109,21 +120,25 @@ fn installZigVersion(
     defer versions.deinit();
 
     const version_info = versions.value.map.get(version_str) orelse {
-        try stdout.writeAll("Version not found in index.\n");
-        try stdout.writeAll("See 'zi ls --remote' for a list of available versions.\n");
+        try stderr.writeAll("Version not found in index.\n");
+        try stderr.writeAll("See 'zi ls --remote' for a list of available versions.\n");
         return;
     };
 
     const full_version_str = version_info.version orelse version_str;
-    var new_install = false;
+    var new_install = force;
     var install_dir = zi.local.openInstallDir(allocator, full_version_str, .{ .iterate = true }) catch |err| blk: {
         if (err != error.FileNotFound) return err;
         new_install = true;
         const new_dir = try zi.local.makeOpenInstallDir(allocator, full_version_str, .{ .iterate = true });
-        try zi.remote.downloadZig(allocator, &client, version_info, new_dir);
         break :blk new_dir;
     };
     defer install_dir.close();
+
+    if (new_install) {
+        try install_dir.deleteTree("");
+        try zi.remote.downloadZig(allocator, &client, version_info, install_dir);
+    }
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     const arena_allocator = arena.allocator();
@@ -131,22 +146,40 @@ fn installZigVersion(
 
     const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
     const zls_name = if (@import("builtin").os.tag == .windows) "zls.exe" else "zls";
-    const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse
-        return error.MissingZigExecutable;
+    const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse {
+        try stderr.writeAll("Failed to locate zig executable.\n");
+        try stderr.writeAll("Try reinstalling using the '--force' flag.\n");
+        return;
+    };
+
     const link_dir = try zi.local.linkDir(arena_allocator);
     const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
-    try std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false });
+    std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false }) catch |err| {
+        if (err != error.FileNotFound) return err;
+        try stderr.writeAll("Invalid link directory.\n");
+        return;
+    };
 
-    // TODO: Allow zls to be optional in case there's no matching release
+    if (skip_zls) return;
+
     if (new_install) {
         if (std.mem.eql(u8, version_str, "master"))
             try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir)
         else
-            try zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir);
+            zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir) catch |err| {
+                if (err != error.NoTaggedRelease)
+                    return err;
+                try stderr.writeAll("Warning: zls not installed!\n");
+                try stderr.writeAll("Unable to find a matching zls tagged release. Use '--skip-zls' to switch to this version in the future.\n");
+                return;
+            };
     }
 
-    const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse
-        return error.MissingZlsExecutable;
+    const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse {
+        try stderr.writeAll("Failed to locate zls executable.\n");
+        try stderr.writeAll("Try reinstalling using the '--force' flag or ignoring this error using '--skip-zls'.\n");
+        return;
+    };
     const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
     try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
 }
