@@ -46,6 +46,7 @@ pub fn openInstallDir(
     flags: std.fs.Dir.OpenOptions,
 ) !std.fs.Dir {
     const install_path = try baseInstallDir(allocator);
+    defer allocator.free(install_path);
     var install_dir = try std.fs.cwd().openDir(install_path, .{});
     defer install_dir.close();
     return install_dir.openDir(version_str, flags);
@@ -58,7 +59,8 @@ pub fn makeOpenInstallDir(
     flags: std.fs.Dir.OpenOptions,
 ) !std.fs.Dir {
     const install_path = try baseInstallDir(allocator);
-    var install_dir = try std.fs.cwd().openDir(install_path, .{});
+    defer allocator.free(install_path);
+    var install_dir = try std.fs.cwd().makeOpenPath(install_path, .{});
     defer install_dir.close();
     return install_dir.makeOpenPath(version_str, flags);
 }

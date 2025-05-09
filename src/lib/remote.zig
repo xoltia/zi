@@ -267,12 +267,26 @@ pub fn downloadCompileMasterZls(
     allocator: std.mem.Allocator,
     client: *std.http.Client,
     compiler: []const u8,
+    version_string: []const u8,
     target_dir: std.fs.Dir,
 ) !void {
-    _ = allocator;
-    _ = client;
-    _ = compiler;
-    _ = target_dir;
+    const source_uri = try std.Uri.parse(zls_master_archive_url);
+    try downloadAndExtract(allocator, client, source_uri, target_dir, null);
+    const source_dir_path = try target_dir.realpathAlloc(allocator, "zls-master");
+    defer allocator.free(source_dir_path);
+    const version_arg = try std.fmt.allocPrint(allocator, "-Dversion-string={s}", .{version_string});
+    defer allocator.free(version_arg);
+    const compiler_args = &[_][]const u8{ compiler, "build", "-Doptimize=ReleaseSafe", version_arg };
+    var compiler_process = std.process.Child.init(compiler_args, allocator);
+    compiler_process.cwd = source_dir_path;
+    const term = try compiler_process.spawnAndWait();
+    switch (term) {
+        .Exited => |code| {
+            if (code != 0)
+                return error.UnexpectedExitCode;
+        },
+        else => return error.CommandFailed,
+    }
 }
 
 pub const ZlsRelease = struct {

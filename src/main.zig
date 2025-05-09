@@ -108,18 +108,19 @@ fn installZigVersion(
     var versions = try zi.remote.fetchZigVersions(allocator, &client);
     defer versions.deinit();
 
-    const version = versions.value.map.get(version_str) orelse {
+    const version_info = versions.value.map.get(version_str) orelse {
         try stdout.writeAll("Version not found in index.\n");
         try stdout.writeAll("See 'zi ls --remote' for a list of available versions.\n");
         return;
     };
 
+    const full_version_str = version_info.version orelse version_str;
     var new_install = false;
-    var install_dir = zi.local.openInstallDir(allocator, version_str, .{ .iterate = true }) catch |err| blk: {
+    var install_dir = zi.local.openInstallDir(allocator, full_version_str, .{ .iterate = true }) catch |err| blk: {
         if (err != error.FileNotFound) return err;
         new_install = true;
-        const new_dir = try zi.local.makeOpenInstallDir(allocator, version_str, .{ .iterate = true });
-        try zi.remote.downloadZig(allocator, &client, version, new_dir);
+        const new_dir = try zi.local.makeOpenInstallDir(allocator, full_version_str, .{ .iterate = true });
+        try zi.remote.downloadZig(allocator, &client, version_info, new_dir);
         break :blk new_dir;
     };
     defer install_dir.close();
@@ -139,7 +140,7 @@ fn installZigVersion(
     // TODO: Allow zls to be optional in case there's no matching release
     if (new_install) {
         if (std.mem.eql(u8, version_str, "master"))
-            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, install_dir)
+            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir)
         else
             try zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir);
     }
