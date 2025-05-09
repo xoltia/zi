@@ -114,10 +114,16 @@ fn installZigVersion(
     force: bool,
     skip_zls: bool,
 ) !void {
+    // TODO: Pass progress to long running fuctions (download/compile)
+    const progress = std.Progress.start(.{});
+    defer progress.end();
+
+    const fetch_progress = progress.start("Fetching versions", 0);
     var client = std.http.Client{ .allocator = allocator };
     defer client.deinit();
     var versions = try zi.remote.fetchZigVersions(allocator, &client);
     defer versions.deinit();
+    fetch_progress.end();
 
     const version_info = versions.value.map.get(version_str) orelse {
         try stderr.writeAll("Version not found in index.\n");
@@ -125,6 +131,7 @@ fn installZigVersion(
         return;
     };
 
+    const zig_install_progress = progress.start("Installing zig", 0);
     const full_version_str = version_info.version orelse version_str;
     var new_install = force;
     var install_dir = zi.local.openInstallDir(allocator, full_version_str, .{ .iterate = true }) catch |err| blk: {
@@ -136,7 +143,11 @@ fn installZigVersion(
     defer install_dir.close();
 
     if (new_install) {
-        try install_dir.deleteTree("");
+        var iterator = install_dir.iterate();
+        while (try iterator.next()) |entry|
+            try install_dir.deleteTree(entry.name);
+        const zig_download_progress = zig_install_progress.start("Downloading", 0);
+        defer zig_download_progress.end();
         try zi.remote.downloadZig(allocator, &client, version_info, install_dir);
     }
 
@@ -144,6 +155,7 @@ fn installZigVersion(
     const arena_allocator = arena.allocator();
     defer arena.deinit();
 
+    const zig_linking_progress = zig_install_progress.start("Linking", 0);
     const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
     const zls_name = if (@import("builtin").os.tag == .windows) "zls.exe" else "zls";
     const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse {
@@ -160,12 +172,20 @@ fn installZigVersion(
         return;
     };
 
+    zig_linking_progress.end();
+    zig_install_progress.end();
     if (skip_zls) return;
 
+    const zls_install_progress = progress.start("Installing zls", 0);
+
     if (new_install) {
-        if (std.mem.eql(u8, version_str, "master"))
-            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir)
-        else
+        if (std.mem.eql(u8, version_str, "master")) {
+            const zls_download_progress = zls_install_progress.start("Downloading and compiling", 0);
+            defer zls_download_progress.end();
+            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir);
+        } else {
+            const zls_download_progress = zls_install_progress.start("Downloading", 0);
+            defer zls_download_progress.end();
             zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir) catch |err| {
                 if (err != error.NoTaggedRelease)
                     return err;
@@ -173,8 +193,10 @@ fn installZigVersion(
                 try stderr.writeAll("Unable to find a matching zls tagged release. Use '--skip-zls' to switch to this version in the future.\n");
                 return;
             };
+        }
     }
 
+    const zls_linking_progress = zls_install_progress.start("Linking", 0);
     const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse {
         try stderr.writeAll("Failed to locate zls executable.\n");
         try stderr.writeAll("Try reinstalling using the '--force' flag or ignoring this error using '--skip-zls'.\n");
@@ -182,6 +204,8 @@ fn installZigVersion(
     };
     const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
     try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
+    zls_linking_progress.end();
+    zls_install_progress.end();
 }
 
 fn listZigVersions(

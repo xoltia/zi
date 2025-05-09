@@ -278,6 +278,8 @@ pub fn downloadCompileMasterZls(
     defer allocator.free(version_arg);
     const compiler_args = &[_][]const u8{ compiler, "build", "-Doptimize=ReleaseSafe", version_arg };
     var compiler_process = std.process.Child.init(compiler_args, allocator);
+    compiler_process.stderr_behavior = .Ignore;
+    compiler_process.stdout_behavior = .Ignore;
     compiler_process.cwd = source_dir_path;
     const term = try compiler_process.spawnAndWait();
     switch (term) {
