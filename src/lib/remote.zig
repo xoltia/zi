@@ -135,7 +135,7 @@ fn downloadAndExtract(
     target_dir: std.fs.Dir,
     tee: ?std.io.AnyWriter,
 ) !void {
-    var header_buffer: [1024]u8 = undefined;
+    var header_buffer: [8192]u8 = undefined;
     var req = try client.open(.GET, source_uri, .{ .server_header_buffer = &header_buffer });
     defer req.deinit();
     try req.send();
@@ -259,7 +259,7 @@ pub fn downloadTaggedZls(
     } else return error.NoTaggedRelease;
 
     const asset = release.getNativeAsset() orelse return error.NoNativeAsset;
-    const source_uri = try std.Uri.parse(asset.url);
+    const source_uri = try std.Uri.parse(asset.browser_download_url);
     try downloadAndExtract(allocator, client, source_uri, target_dir, null);
 }
 
@@ -280,7 +280,7 @@ pub const ZlsRelease = struct {
     assets: []Asset,
 
     const Asset = struct {
-        url: []const u8,
+        browser_download_url: []const u8,
         size: u64,
         name: []const u8,
     };
