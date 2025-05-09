@@ -114,8 +114,10 @@ fn installZigVersion(
         return;
     };
 
+    var new_install = false;
     var install_dir = zi.local.openInstallDir(version_str, .{ .iterate = true }) catch |err| blk: {
         if (err != error.FileNotFound) return err;
+        new_install = true;
         const new_dir = try zi.local.makeOpenInstallDir(version_str, .{ .iterate = true });
         try zi.remote.downloadZig(allocator, &client, version, new_dir);
         break :blk new_dir;
@@ -134,13 +136,14 @@ fn installZigVersion(
     const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
     try std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false });
 
-    if (std.mem.eql(u8, version_str, "master")) {
-        try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, install_dir);
-    } else {
-        try zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir);
+    // TODO: Allow zls to be optional in case there's no matching release
+    if (new_install) {
+        if (std.mem.eql(u8, version_str, "master"))
+            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, install_dir)
+        else
+            try zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir);
     }
 
-    // TODO: Allow zls to be optional
     const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse
         return error.MissingZlsExecutable;
     const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
