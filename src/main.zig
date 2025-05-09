@@ -115,10 +115,10 @@ fn installZigVersion(
     };
 
     var new_install = false;
-    var install_dir = zi.local.openInstallDir(version_str, .{ .iterate = true }) catch |err| blk: {
+    var install_dir = zi.local.openInstallDir(allocator, version_str, .{ .iterate = true }) catch |err| blk: {
         if (err != error.FileNotFound) return err;
         new_install = true;
-        const new_dir = try zi.local.makeOpenInstallDir(version_str, .{ .iterate = true });
+        const new_dir = try zi.local.makeOpenInstallDir(allocator, version_str, .{ .iterate = true });
         try zi.remote.downloadZig(allocator, &client, version, new_dir);
         break :blk new_dir;
     };

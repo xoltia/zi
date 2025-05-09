@@ -40,26 +40,30 @@ pub fn iterateInstalledVersions(allocator: std.mem.Allocator) !VersionIterator {
     };
 }
 
-pub fn openInstallDir(version_str: []const u8, flags: std.fs.Dir.OpenOptions) !std.fs.Dir {
-    var buff: [std.fs.max_path_bytes]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buff);
-    const install_path = try baseInstallDir(fba.allocator());
+pub fn openInstallDir(
+    allocator: std.mem.Allocator,
+    version_str: []const u8,
+    flags: std.fs.Dir.OpenOptions,
+) !std.fs.Dir {
+    const install_path = try baseInstallDir(allocator);
     var install_dir = try std.fs.cwd().openDir(install_path, .{});
     defer install_dir.close();
     return install_dir.openDir(version_str, flags);
 }
 
 /// Open an existing install directory or create a new one for a given version string.
-pub fn makeOpenInstallDir(version_str: []const u8, flags: std.fs.Dir.OpenOptions) !std.fs.Dir {
-    var buff: [std.fs.max_path_bytes]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buff);
-    const install_path = try baseInstallDir(fba.allocator());
+pub fn makeOpenInstallDir(
+    allocator: std.mem.Allocator,
+    version_str: []const u8,
+    flags: std.fs.Dir.OpenOptions,
+) !std.fs.Dir {
+    const install_path = try baseInstallDir(allocator);
     var install_dir = try std.fs.cwd().openDir(install_path, .{});
     defer install_dir.close();
     return install_dir.makeOpenPath(version_str, flags);
 }
 
-const Executable = enum { zls, zig };
+pub const Executable = enum { zls, zig };
 
 /// Locates an executable in the given directory.
 /// `dir` must have been opened with `OpenOptions{ .iterate = true }`.
