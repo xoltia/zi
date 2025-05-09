@@ -127,10 +127,24 @@ fn installZigVersion(
     defer arena.deinit();
 
     const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
-    const location = try zi.local.locateExecutables(arena_allocator, install_dir);
+    const zls_name = if (@import("builtin").os.tag == .windows) "zls.exe" else "zls";
+    const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse
+        return error.MissingZigExecutable;
     const link_dir = try zi.local.linkDir(arena_allocator);
     const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
-    try std.fs.cwd().atomicSymLink(location.zig, link_path, .{ .is_directory = false });
+    try std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false });
+
+    if (std.mem.eql(u8, version_str, "master")) {
+        try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, install_dir);
+    } else {
+        try zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir);
+    }
+
+    // TODO: Allow zls to be optional
+    const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse
+        return error.MissingZlsExecutable;
+    const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
+    try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
 }
 
 fn listZigVersions(

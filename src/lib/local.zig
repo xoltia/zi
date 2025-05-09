@@ -1,25 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const ExecutablePaths = struct {
-    zig: []const u8,
-    zls: ?[]const u8,
-
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(self.zig);
-        if (self.zls) |zls| allocator.free(zls);
-    }
-};
-
 pub const Version = struct {
     parent_dir: std.fs.Dir,
     name: []const u8,
-
-    pub fn executables(self: @This(), allocator: std.mem.Allocator) !ExecutablePaths {
-        const dir = try self.parent_dir.openDir(self.name, .{ .iterate = true });
-        defer dir.close();
-        return locateExecutables(allocator, dir);
-    }
 };
 
 pub const VersionIterator = struct {
@@ -75,20 +59,21 @@ pub fn makeOpenInstallDir(version_str: []const u8, flags: std.fs.Dir.OpenOptions
     return install_dir.makeOpenPath(version_str, flags);
 }
 
-/// Get the executable paths from a version directory.
+const Executable = enum { zls, zig };
+
+/// Locates an executable in the given directory.
 /// `dir` must have been opened with `OpenOptions{ .iterate = true }`.
-pub fn locateExecutables(allocator: std.mem.Allocator, dir: std.fs.Dir) !ExecutablePaths {
+pub fn locateExecutable(
+    comptime kind: Executable,
+    allocator: std.mem.Allocator,
+    dir: std.fs.Dir,
+) !?[]const u8 {
     var base_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
     const base_path = try std.os.getFdPath(dir.fd, &base_path_buffer);
-    const expected_name_zig = if (builtin.os.tag != .windows) "zig" else "zig.exe";
-    const expected_name_zls = if (builtin.os.tag != .windows) "zls" else "zls.exe";
-    var zig_exe_path: ?[]const u8 = null;
-    var zls_exe_path: ?[]const u8 = null;
+    const expected_name = @tagName(kind) ++ if (builtin.os.tag == .windows) ".exe" else "";
+    var exe_path: ?[]const u8 = null;
 
-    errdefer {
-        if (zig_exe_path) |p| allocator.free(p);
-        if (zls_exe_path) |p| allocator.free(p);
-    }
+    errdefer if (exe_path) |p| allocator.free(p);
 
     var walker = try dir.walk(allocator);
     defer walker.deinit();
@@ -96,26 +81,15 @@ pub fn locateExecutables(allocator: std.mem.Allocator, dir: std.fs.Dir) !Executa
     while (try walker.next()) |entry| {
         // The entry must be a file matching the expected name and it must be executable.
         if (entry.kind != .file) continue;
-        const is_zls = zls_exe_path == null and std.mem.eql(u8, entry.basename, expected_name_zls);
-        const is_zig = zig_exe_path == null and std.mem.eql(u8, entry.basename, expected_name_zig);
-        if (!is_zig and !is_zls) continue;
+        if (!std.mem.eql(u8, expected_name, entry.basename)) continue;
         const executable = try isExecutableZ(dir, entry.path);
         if (!executable) continue;
-
         const full_path = try std.fs.path.join(allocator, &[_][]const u8{ base_path, entry.path });
-        if (is_zig)
-            zig_exe_path = full_path
-        else
-            zls_exe_path = full_path;
-
-        if (zig_exe_path != null and zls_exe_path != null)
-            break;
+        exe_path = full_path;
+        break;
     }
 
-    if (zig_exe_path == null)
-        return error.MissingZigExecutable;
-
-    return .{ .zig = zig_exe_path.?, .zls = zls_exe_path };
+    return exe_path;
 }
 
 pub fn baseInstallDir(allocator: std.mem.Allocator) ![]const u8 {

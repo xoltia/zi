@@ -244,25 +244,6 @@ const DecompressReader = union(enum) {
     }
 };
 
-// const ZlsVersion = union(enum) {
-//     /// Tag string (ex. 0.14.0)
-//     tagged: []const u8,
-//     /// Path to compiler for building from master
-//     master: []const u8,
-// };
-
-// pub fn downloadZls(
-//     allocator: std.mem.Allocator,
-//     client: *std.http.Client,
-//     version: ZlsVersion,
-//     target_dir: std.fs.Dir,
-// ) !void {
-//     _ = allocator;
-//     _ = client;
-//     _ = version;
-//     _ = target_dir;
-// }
-
 pub fn downloadTaggedZls(
     allocator: std.mem.Allocator,
     client: *std.http.Client,
@@ -273,7 +254,7 @@ pub fn downloadTaggedZls(
     defer versions.deinit();
 
     const release = for (versions.value) |release| {
-        if (release.tag_name == tag_name)
+        if (std.mem.eql(u8, release.tag_name, tag_name))
             break release;
     } else return error.NoTaggedRelease;
 
@@ -319,14 +300,16 @@ pub const ZlsRelease = struct {
             .windows => "windows",
             .linux => "linux",
             .macos => "maxos",
+            else => @compileError("unsupported platform"),
         };
 
         var possible_names: [possible_exts.len * possible_arch.len][]const u8 = undefined;
-        inline for (possible_exts, 0..) |ext, i| {
-            inline for (possible_arch, 0..) |arch, j| {
+        comptime var index: comptime_int = 0;
+        inline for (possible_exts) |ext| {
+            inline for (possible_arch) |arch| {
                 const name = std.fmt.comptimePrint("{s}-{s}.{s}", .{ arch, os_str, ext });
-                const index = i * possible_exts.len + j;
                 possible_names[index] = name;
+                index += 1;
             }
         }
 
