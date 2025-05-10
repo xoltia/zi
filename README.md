@@ -26,7 +26,3 @@ Environment variables:
     ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)
 ```
 
-## TODO
-- [ ] Progress messages
-- [ ] Better error handling
-- [ ] Version removal
