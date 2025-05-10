@@ -328,7 +328,9 @@ pub fn downloadCompileMasterZls(
     defer allocator.free(source_dir_path);
     const version_arg = try std.fmt.allocPrint(allocator, "-Dversion-string={s}", .{version_string});
     defer allocator.free(version_arg);
+
     const compiler_args = &[_][]const u8{ compiler, "build", "-Doptimize=ReleaseSafe", version_arg };
+
     var compiler_process = std.process.Child.init(compiler_args, allocator);
     compiler_process.stderr_behavior = .Ignore;
     compiler_process.stdout_behavior = .Ignore;
@@ -336,6 +338,11 @@ pub fn downloadCompileMasterZls(
     compiler_process.progress_node = compile_progress;
     const term = try compiler_process.spawnAndWait();
     compile_progress.end();
+
+    var source_dir = try std.fs.cwd().openDir(source_dir_path, .{ .iterate = true });
+    defer source_dir.close();
+    try source_dir.deleteTree(".zig-cache");
+
     switch (term) {
         .Exited => |code| {
             if (code != 0)

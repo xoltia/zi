@@ -115,7 +115,6 @@ fn installZigVersion(
     force: bool,
     skip_zls: bool,
 ) !void {
-    // TODO: Pass progress to long running fuctions (download/compile)
     const progress = std.Progress.start(.{});
     defer progress.end();
 
