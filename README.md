@@ -21,6 +21,10 @@ Flags for `ls` subcommand:
     -r, --remote         List only remote versions
     -l, --local          List only local versions
 
+Flags for `install` subcommand:
+    -f, --force          Remove the existing download if it exists
+    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
+
 Environment variables:
     ZI_INSTALL_DIR       Directory to install Zig versions (default: $HOME/.zi)
     ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)

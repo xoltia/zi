@@ -22,6 +22,7 @@ const help_text =
     \\Flags for `install` subcommand:
     \\    -f, --force          Remove the existing download if it exists
     \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
+    \\
     \\Environment variables:
     \\    ZI_INSTALL_DIR       Directory to install Zig versions (default: $HOME/.zi)
     \\    ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)
@@ -66,7 +67,7 @@ pub fn main() !void {
             try stderr.writeAll(help_text);
             return;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            try stdout.writeAll("zi version 0.0.0\n");
+            try stdout.writeAll("zi version 0.1.0\n");
             return;
         } else if (std.mem.eql(u8, arg, "--local") or std.mem.eql(u8, arg, "-l")) {
             local_flag = true;
