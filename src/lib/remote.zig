@@ -98,10 +98,15 @@ pub fn downloadZig(
     client: *std.http.Client,
     version: ZigVersion,
     target_dir: std.fs.Dir,
+    progress: std.Progress.Node,
 ) !void {
     const source = version.getNativeSource() orelse return error.NoSourceForVersion;
     const source_uri = try std.Uri.parse(source.tarball);
-    try downloadAndExtract(allocator, client, source_uri, target_dir, null);
+    const size = try std.fmt.parseInt(usize, source.size, 10);
+    progress.setEstimatedTotalItems(size);
+    var progress_writer = try ProgressWriter.init(allocator, progress);
+    defer progress_writer.deinit(allocator);
+    try downloadAndExtract(allocator, client, source_uri, target_dir, progress_writer.anyWriter());
     // TODO: find out why this isn't working
     // var sha256 = Sha256.init(.{});
     // const sha256_writer = sha256.writer().any();
@@ -244,14 +249,50 @@ const DecompressReader = union(enum) {
     }
 };
 
-pub fn downloadTaggedZls(
+const ProgressWriter = struct {
+    node: std.Progress.Node,
+    n: *usize,
+
+    fn init(allocator: std.mem.Allocator, node: std.Progress.Node) !ProgressWriter {
+        const n = try allocator.create(usize);
+        n.* = 0;
+        return .{ .node = node, .n = n };
+    }
+
+    fn deinit(self: ProgressWriter, allocator: std.mem.Allocator) void {
+        allocator.destroy(self.n);
+    }
+
+    fn write(self: ProgressWriter, buf: []const u8) !usize {
+        self.n.* += buf.len;
+        self.node.setCompletedItems(self.n.*);
+        return buf.len;
+    }
+
+    fn typeErasedWriteFn(context: *const anyopaque, buffer: []const u8) anyerror!usize {
+        const ptr: *const ProgressWriter = @alignCast(@ptrCast(context));
+        return write(ptr.*, buffer);
+    }
+
+    fn anyWriter(self: *ProgressWriter) std.io.AnyWriter {
+        return .{
+            .context = @ptrCast(self),
+            .writeFn = typeErasedWriteFn,
+        };
+    }
+};
+
+pub fn fetchDownloadTaggedZls(
     allocator: std.mem.Allocator,
     client: *std.http.Client,
     tag_name: []const u8,
     target_dir: std.fs.Dir,
+    progress: std.Progress.Node,
 ) !void {
+    const fetch_progress = progress.start("Fetching zls versions", 0);
     const versions = try fetchZlsVersions(allocator, client);
     defer versions.deinit();
+    fetch_progress.end();
 
     const release = for (versions.value) |release| {
         if (std.mem.eql(u8, release.tag_name, tag_name))
@@ -260,7 +301,11 @@ pub fn downloadTaggedZls(
 
     const asset = release.getNativeAsset() orelse return error.NoNativeAsset;
     const source_uri = try std.Uri.parse(asset.browser_download_url);
-    try downloadAndExtract(allocator, client, source_uri, target_dir, null);
+    const download_progress = progress.start("Downloading", asset.size);
+    defer download_progress.end();
+    var progress_writer = try ProgressWriter.init(allocator, download_progress);
+    defer progress_writer.deinit(allocator);
+    try downloadAndExtract(allocator, client, source_uri, target_dir, progress_writer.anyWriter());
 }
 
 pub fn downloadCompileMasterZls(
@@ -269,9 +314,16 @@ pub fn downloadCompileMasterZls(
     compiler: []const u8,
     version_string: []const u8,
     target_dir: std.fs.Dir,
+    progress: std.Progress.Node,
 ) !void {
+    const download_progress = progress.start("Downloading", 0);
     const source_uri = try std.Uri.parse(zls_master_archive_url);
-    try downloadAndExtract(allocator, client, source_uri, target_dir, null);
+    var progress_writer = try ProgressWriter.init(allocator, download_progress);
+    defer progress_writer.deinit(allocator);
+    try downloadAndExtract(allocator, client, source_uri, target_dir, progress_writer.anyWriter());
+    download_progress.end();
+
+    const compile_progress = progress.start("Compiling", 0);
     const source_dir_path = try target_dir.realpathAlloc(allocator, "zls-master");
     defer allocator.free(source_dir_path);
     const version_arg = try std.fmt.allocPrint(allocator, "-Dversion-string={s}", .{version_string});
@@ -281,7 +333,9 @@ pub fn downloadCompileMasterZls(
     compiler_process.stderr_behavior = .Ignore;
     compiler_process.stdout_behavior = .Ignore;
     compiler_process.cwd = source_dir_path;
+    compiler_process.progress_node = compile_progress;
     const term = try compiler_process.spawnAndWait();
+    compile_progress.end();
     switch (term) {
         .Exited => |code| {
             if (code != 0)

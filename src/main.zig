@@ -148,7 +148,7 @@ fn installZigVersion(
             try install_dir.deleteTree(entry.name);
         const zig_download_progress = zig_install_progress.start("Downloading", 0);
         defer zig_download_progress.end();
-        try zi.remote.downloadZig(allocator, &client, version_info, install_dir);
+        try zi.remote.downloadZig(allocator, &client, version_info, install_dir, zig_download_progress);
     }
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -180,13 +180,9 @@ fn installZigVersion(
 
     if (new_install) {
         if (std.mem.eql(u8, version_str, "master")) {
-            const zls_download_progress = zls_install_progress.start("Downloading and compiling", 0);
-            defer zls_download_progress.end();
-            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir);
+            try zi.remote.downloadCompileMasterZls(allocator, &client, zig_location, version_info.version.?, install_dir, zls_install_progress);
         } else {
-            const zls_download_progress = zls_install_progress.start("Downloading", 0);
-            defer zls_download_progress.end();
-            zi.remote.downloadTaggedZls(allocator, &client, version_str, install_dir) catch |err| {
+            zi.remote.fetchDownloadTaggedZls(allocator, &client, version_str, install_dir, zls_install_progress) catch |err| {
                 if (err != error.NoTaggedRelease)
                     return err;
                 try stderr.writeAll("Warning: zls not installed!\n");
