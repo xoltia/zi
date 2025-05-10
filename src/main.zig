@@ -95,8 +95,9 @@ pub fn main() !void {
         return;
     }
 
+    const color = std.io.getStdOut().isTty();
     switch (subcommand.?) {
-        .ls => try listZigVersions(allocator, stdout, local_flag, remote_flag),
+        .ls => try listZigVersions(allocator, stdout, local_flag, remote_flag, color),
         .install => {
             if (positional == null) {
                 try stderr.writeAll("zi: No version provided\n");
@@ -209,17 +210,22 @@ fn listZigVersions(
     stdout: std.io.AnyWriter,
     local_flag: bool,
     remote_flag: bool,
+    color: bool,
 ) !void {
     if (local_flag) {
         try listLocalZigVersions(allocator, stdout);
     } else if (remote_flag) {
         try listRemoteZigVersions(allocator, stdout);
     } else {
-        try listAllZigVersions(allocator, stdout);
+        try listAllZigVersions(allocator, stdout, color);
     }
 }
 
-fn listAllZigVersions(allocator: std.mem.Allocator, stdout: std.io.AnyWriter) !void {
+fn listAllZigVersions(
+    allocator: std.mem.Allocator,
+    stdout: std.io.AnyWriter,
+    color: bool,
+) !void {
     var local_iterator = try zi.local.iterateInstalledVersions(allocator);
     defer local_iterator.deinit();
 
@@ -250,19 +256,40 @@ fn listAllZigVersions(allocator: std.mem.Allocator, stdout: std.io.AnyWriter) !v
         }
     }
 
+    const SortCtx = struct {
+        map: @TypeOf(versions),
+
+        pub fn lessThan(ctx: @This(), a_index: usize, b_index: usize) bool {
+            const keys = ctx.map.unmanaged.entries.items(.key);
+            const a_semvar = std.SemanticVersion.parse(keys[a_index]) catch return false;
+            const b_semvar = std.SemanticVersion.parse(keys[b_index]) catch return false;
+            return a_semvar.order(b_semvar) != .lt; // Descending order
+        }
+    };
+
+    versions.sort(SortCtx{ .map = versions });
+
     // TODO: Sort versions
     var it = versions.iterator();
     while (it.next()) |entry| {
         const version = entry.key_ptr.*;
         const status = entry.value_ptr.*;
-
-        switch (status) {
-            .remote_only => try stdout.print("{s}{s}\n", .{
-                if (has_status_indicator) "  " else "",
-                version,
-            }),
-            else => try stdout.print("+ {s}\n", .{version}),
+        if (color) {
+            const ansi: [2]u8 = .{ 0o033, '[' };
+            try stdout.writeAll(ansi ++ switch (status) {
+                .remote_only => "31mR",
+                .local_only => "34mL",
+                .local_and_remote => "32mI",
+            } ++ ansi ++ "0m ");
+        } else {
+            try stdout.writeAll(switch (status) {
+                .remote_only => "R",
+                .local_only => "L",
+                .local_and_remote => "I",
+            } ++ " ");
         }
+        try stdout.writeAll(version);
+        try stdout.writeByte('\n');
     }
 }
 
