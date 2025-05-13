@@ -376,7 +376,7 @@ pub const ZlsRelease = struct {
         const os_str = switch (builtin.os.tag) {
             .windows => "windows",
             .linux => "linux",
-            .macos => "maxos",
+            .macos => "macos",
             else => @compileError("unsupported platform"),
         };
 
