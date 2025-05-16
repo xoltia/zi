@@ -45,8 +45,7 @@ pub fn main() !void {
     const stderr = std.io.getStdErr().writer().any();
     const stdout = std.io.getStdOut().writer().any();
 
-    // TODO: In the future more than one flag can be passed.
-    // This should be made more flexible.
+    // TODO: more versatile flag parsing
     var local_flag = false;
     var remote_flag = false;
     var skip_zls_flag = false;
@@ -67,7 +66,7 @@ pub fn main() !void {
             try stderr.writeAll(help_text);
             return;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            try stdout.writeAll("zi version 0.1.0\n");
+            try stdout.writeAll("zi version 0.1.1\n");
             return;
         } else if (std.mem.eql(u8, arg, "--local") or std.mem.eql(u8, arg, "-l")) {
             local_flag = true;
@@ -269,7 +268,6 @@ fn listAllZigVersions(
 
     versions.sort(SortCtx{ .map = versions });
 
-    // TODO: Sort versions
     var it = versions.iterator();
     while (it.next()) |entry| {
         const version = entry.key_ptr.*;
