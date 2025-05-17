@@ -1,4 +1,4 @@
-# zig installer
+# zi: a zig installer
 
 zi is a basic tool that helps you install specific versions of Zig from the official index.
 It can also install ZLS, either from GitHub releases or by building it from source for use with the latest Zig version.
@@ -26,7 +26,9 @@ Flags for `install` subcommand:
     -s, --skip-zls       Skip downloading and/or linking the ZLS executable
 
 Environment variables:
-    ZI_INSTALL_DIR       Directory to install Zig versions (default: $HOME/.zi)
-    ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)
+    ZI_INSTALL_DIR       Directory to install Zig versions
+                         (default: $HOME/.zi)
+    ZI_LINK_DIR          Directory to create symlinks for the active Zig version
+                         (default: $HOME/.local/bin)
 ```
 
