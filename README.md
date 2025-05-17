@@ -1,7 +1,7 @@
 # zig installer
 
-zi is a simple zig installer. Supports installation of tagged Zig versions available from
-the official index, as well as ZLS installation (including master compilation).
+zi is a basic tool that helps you install specific versions of Zig from the official index.
+It can also install ZLS, either from GitHub releases or by building it from source for use with the latest Zig version.
 
 ## Usage
 
