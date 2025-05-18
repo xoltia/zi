@@ -170,22 +170,23 @@ fn downloadAndExtract(
     if (!std.mem.eql(u8, archive_type, "tar"))
         return error.UnsupportedArchiveType;
 
-    const CompressionExt = enum { xz, gz };
-    var decompressor: DecompressReader =
-        if (compression_type) |ext_str|
-            if (std.meta.stringToEnum(CompressionExt, ext_str)) |ext|
-                switch (ext) {
-                    .xz => .{ .xz = try xz.decompress(allocator, reader) },
-                    .gz => .{ .gzip = gzip.decompressor(reader) },
-                }
-            else
-                return error.UnsupportedCompressionType
-        else
-            .{ .raw = reader };
-    defer decompressor.deinit();
+    if (compression_type == null)
+        try std.tar.pipeToFileSystem(target_dir, reader, .{});
 
-    const decompress_reader = decompressor.reader();
-    try std.tar.pipeToFileSystem(target_dir, decompress_reader, .{});
+    const ext = std.meta.stringToEnum(enum { xz, gz }, compression_type.?) orelse
+        return error.UnsupportedCompressionType;
+
+    switch (ext) {
+        .xz => {
+            var xz_decompressor = try xz.decompress(allocator, reader);
+            defer xz_decompressor.deinit();
+            try std.tar.pipeToFileSystem(target_dir, xz_decompressor.reader(), .{});
+        },
+        .gz => {
+            var gzip_decompressor = gzip.decompressor(reader);
+            try std.tar.pipeToFileSystem(target_dir, gzip_decompressor.reader(), .{});
+        },
+    }
 }
 
 fn extractZip(allocator: std.mem.Allocator, dest: std.fs.Dir, src: std.io.AnyReader) !void {
@@ -225,27 +226,6 @@ const TeeReader = struct {
             .context = @ptrCast(self),
             .readFn = typeErasedReadFn,
         };
-    }
-};
-
-const DecompressReader = union(enum) {
-    xz: xz.Decompress(std.io.AnyReader),
-    gzip: gzip.Decompressor(std.io.AnyReader),
-    raw: std.io.AnyReader,
-
-    fn reader(self: *@This()) std.io.AnyReader {
-        return switch (self.*) {
-            .raw => |raw| raw,
-            .gzip => |*d| d.reader().any(),
-            .xz => |*d| d.reader().any(),
-        };
-    }
-
-    fn deinit(self: *@This()) void {
-        switch (self.*) {
-            .xz => |*d| d.deinit(),
-            else => {},
-        }
     }
 };
 
