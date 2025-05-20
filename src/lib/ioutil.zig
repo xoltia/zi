@@ -60,32 +60,6 @@ pub const ProgressWriter = struct {
     }
 };
 
-pub const MultiWriter = struct {
-    writers: []const std.io.AnyWriter,
-
-    pub fn init(writers: []const std.io.AnyWriter) MultiWriter {
-        return .{ .writers = writers };
-    }
-
-    pub fn write(self: MultiWriter, buf: []const u8) !usize {
-        for (self.writers) |w|
-            try w.writeAll(buf);
-        return buf.len;
-    }
-
-    fn typeErasedWriteFn(context: *const anyopaque, buffer: []const u8) anyerror!usize {
-        const ptr: *const MultiWriter = @alignCast(@ptrCast(context));
-        return write(ptr.*, buffer);
-    }
-
-    pub fn anyWriter(self: *MultiWriter) std.io.AnyWriter {
-        return .{
-            .context = @ptrCast(self),
-            .writeFn = typeErasedWriteFn,
-        };
-    }
-};
-
 /// Reads all data from the provided reader without preserving the data.
 pub fn discard(reader: anytype) anyerror!void {
     var buf: [512]u8 = undefined;

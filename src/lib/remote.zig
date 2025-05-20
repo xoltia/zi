@@ -4,7 +4,6 @@ const tempfile = @import("tempfile.zig");
 const xz = std.compress.xz;
 const gzip = std.compress.gzip;
 const ioutil = @import("ioutil.zig");
-const MultiWriter = ioutil.MultiWriter;
 const TeeReader = ioutil.TeeReader;
 const ProgressWriter = ioutil.ProgressWriter;
 const Sha256 = std.crypto.hash.sha2.Sha256;
@@ -112,12 +111,12 @@ pub fn downloadZig(
     var progress_writer = try ProgressWriter.init(allocator, progress);
     defer progress_writer.deinit(allocator);
     var sha256 = Sha256.init(.{});
-    var multi = MultiWriter.init(&.{
+    var multi = std.io.multiWriter(.{
         sha256.writer().any(),
         progress_writer.anyWriter(),
     });
 
-    try downloadAndExtract(allocator, client, source_uri, target_dir, multi.anyWriter());
+    try downloadAndExtract(allocator, client, source_uri, target_dir, multi.writer().any());
     const sum = sha256.finalResult();
     const sum_str = &std.fmt.bytesToHex(sum, .lower);
     const match = std.mem.eql(u8, source.shasum, sum_str);
