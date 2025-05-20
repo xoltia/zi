@@ -3,6 +3,10 @@ const builtin = @import("builtin");
 const tempfile = @import("tempfile.zig");
 const xz = std.compress.xz;
 const gzip = std.compress.gzip;
+const ioutil = @import("ioutil.zig");
+const MultiWriter = ioutil.MultiWriter;
+const TeeReader = ioutil.TeeReader;
+const ProgressWriter = ioutil.ProgressWriter;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 const zig_index_url = "https://ziglang.org/download/index.json";
@@ -103,30 +107,21 @@ pub fn downloadZig(
     const source = version.getNativeSource() orelse return error.NoSourceForVersion;
     const source_uri = try std.Uri.parse(source.tarball);
     const size = try std.fmt.parseInt(usize, source.size, 10);
+
     progress.setEstimatedTotalItems(size);
     var progress_writer = try ProgressWriter.init(allocator, progress);
     defer progress_writer.deinit(allocator);
-    try downloadAndExtract(allocator, client, source_uri, target_dir, progress_writer.anyWriter());
-    // TODO: find out why this isn't working
-    // var sha256 = Sha256.init(.{});
-    // const sha256_writer = sha256.writer().any();
-    // try downloadAndExtract(allocator, client, source_uri, target_dir, sha256_writer);
-    // const sum = &sha256.finalResult();
-    // const sum_str = std.fmt.bytesToHex(sum, .lower);
-    // std.debug.print("{s} {s}\n", .{ sum_str, source.shasum });
-    // const match = try compareShasumHex(source.shasum, sum);
-    // if (!match) return error.SumMismatch;
-}
+    var sha256 = Sha256.init(.{});
+    var multi = MultiWriter.init(&.{
+        sha256.writer().any(),
+        progress_writer.anyWriter(),
+    });
 
-fn compareShasumHex(hex: []const u8, sum: []const u8) !bool {
-    if (hex.len != sum.len * 2) return false;
-    var i: usize = 0;
-    while (i < hex.len) : (i += 2) {
-        const hi = try std.fmt.charToDigit(hex[i], 16);
-        const lo = try std.fmt.charToDigit(hex[i + 1], 16);
-        if (sum[i] != (hi << 4) | lo) return false;
-    }
-    return true;
+    try downloadAndExtract(allocator, client, source_uri, target_dir, multi.anyWriter());
+    const sum = sha256.finalResult();
+    const sum_str = &std.fmt.bytesToHex(sum, .lower);
+    const match = std.mem.eql(u8, source.shasum, sum_str);
+    if (!match) return error.SumMismatch;
 }
 
 /// Downloads an archive file from the provided `source_uri` and extracts its
@@ -155,7 +150,9 @@ fn downloadAndExtract(
     };
     const file_type = std.fs.path.extension(path_str);
     if (std.mem.eql(u8, file_type, ".zip")) {
-        return extractZip(allocator, target_dir, reader);
+        try extractZip(allocator, target_dir, reader);
+        try ioutil.discard(reader);
+        return;
     }
 
     // Can either be `.tar.xz`, `.tar.gz`, or `.tar`.
@@ -170,8 +167,11 @@ fn downloadAndExtract(
     if (!std.mem.eql(u8, archive_type, "tar"))
         return error.UnsupportedArchiveType;
 
-    if (compression_type == null)
+    if (compression_type == null) {
         try std.tar.pipeToFileSystem(target_dir, reader, .{});
+        try ioutil.discard(reader);
+        return;
+    }
 
     const ext = std.meta.stringToEnum(enum { xz, gz }, compression_type.?) orelse
         return error.UnsupportedCompressionType;
@@ -187,6 +187,9 @@ fn downloadAndExtract(
             try std.tar.pipeToFileSystem(target_dir, gzip_decompressor.reader(), .{});
         },
     }
+
+    // Make sure to read everything so the checksum doesn't get messed up.
+    try ioutil.discard(reader);
 }
 
 fn extractZip(allocator: std.mem.Allocator, dest: std.fs.Dir, src: std.io.AnyReader) !void {
@@ -201,66 +204,6 @@ fn extractZip(allocator: std.mem.Allocator, dest: std.fs.Dir, src: std.io.AnyRea
     try std.zip.extract(dest, stream, .{});
     try temp.delete();
 }
-
-const TeeReader = struct {
-    inner: std.io.AnyReader,
-    tee: ?std.io.AnyWriter,
-
-    fn init(inner: std.io.AnyReader, tee: ?std.io.AnyWriter) TeeReader {
-        return TeeReader{ .inner = inner, .tee = tee };
-    }
-
-    fn read(self: TeeReader, buf: []u8) !usize {
-        const bytes_read = try self.inner.read(buf);
-        if (self.tee) |tee| try tee.writeAll(buf[0..bytes_read]);
-        return bytes_read;
-    }
-
-    fn typeErasedReadFn(context: *const anyopaque, buffer: []u8) anyerror!usize {
-        const ptr: *const TeeReader = @alignCast(@ptrCast(context));
-        return read(ptr.*, buffer);
-    }
-
-    fn anyReader(self: *TeeReader) std.io.AnyReader {
-        return .{
-            .context = @ptrCast(self),
-            .readFn = typeErasedReadFn,
-        };
-    }
-};
-
-const ProgressWriter = struct {
-    node: std.Progress.Node,
-    n: *usize,
-
-    fn init(allocator: std.mem.Allocator, node: std.Progress.Node) !ProgressWriter {
-        const n = try allocator.create(usize);
-        n.* = 0;
-        return .{ .node = node, .n = n };
-    }
-
-    fn deinit(self: ProgressWriter, allocator: std.mem.Allocator) void {
-        allocator.destroy(self.n);
-    }
-
-    fn write(self: ProgressWriter, buf: []const u8) !usize {
-        self.n.* += buf.len;
-        self.node.setCompletedItems(self.n.*);
-        return buf.len;
-    }
-
-    fn typeErasedWriteFn(context: *const anyopaque, buffer: []const u8) anyerror!usize {
-        const ptr: *const ProgressWriter = @alignCast(@ptrCast(context));
-        return write(ptr.*, buffer);
-    }
-
-    fn anyWriter(self: *ProgressWriter) std.io.AnyWriter {
-        return .{
-            .context = @ptrCast(self),
-            .writeFn = typeErasedWriteFn,
-        };
-    }
-};
 
 pub fn fetchDownloadTaggedZls(
     allocator: std.mem.Allocator,
