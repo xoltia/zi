@@ -10,6 +10,7 @@ const help_text =
     \\Subcommands:
     \\    ls                   List Zig versions
     \\    install <version>    Install a specific Zig version
+    \\    use [<version>]      Switch to a specific Zig version. Uses .zirc if available and version is omitted.
     \\
     \\Flags:
     \\    -h, --help           Print help information
@@ -32,6 +33,7 @@ const help_text =
 const Subcommand = enum {
     ls,
     install,
+    use,
 };
 
 pub fn main() !void {
@@ -78,6 +80,9 @@ pub fn main() !void {
             force_flag = true;
         } else if (std.mem.eql(u8, arg, "ls") and subcommand == null) {
             subcommand = .ls;
+        } else if (std.mem.eql(u8, arg, "use") and subcommand == null) {
+            subcommand = .use;
+            reading_positional = true;
         } else if (std.mem.eql(u8, arg, "install") and subcommand == null) {
             subcommand = .install;
             reading_positional = true;
@@ -104,6 +109,9 @@ pub fn main() !void {
                 return;
             }
             try installZigVersion(allocator, stderr, positional.?, force_flag, skip_zls_flag);
+        },
+        .use => {
+            try useZigVersion(allocator, stderr, positional);
         },
     }
 }
@@ -202,6 +210,85 @@ fn installZigVersion(
     try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
     zls_linking_progress.end();
     zls_install_progress.end();
+}
+
+fn useZigVersion(
+    allocator: std.mem.Allocator,
+    stderr: std.io.AnyWriter,
+    maybe_version_str: ?[]const u8,
+) !void {
+    var local_iterator = try zi.local.iterateInstalledVersions(allocator);
+    defer local_iterator.deinit();
+
+    var version_str: []const u8 = undefined;
+
+    if (maybe_version_str == null) {
+        const file = std.fs.cwd().openFile(".zirc", .{ .mode = .read_only }) catch {
+            try stderr.writeAll("zi: No .zirc file found and no version specified\n");
+            try stderr.writeAll("See 'zi --help' for more information.\n");
+            return;
+        };
+        var buf_reader = std.io.bufferedReader(file.reader());
+        var in_stream = buf_reader.reader();
+
+        var buf: [32]u8 = undefined;
+        while (try in_stream.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+            version_str = std.mem.trim(u8, line, " ");
+            break;
+        }
+    } else {
+        version_str = maybe_version_str.?;
+    }
+
+    const installed_version = while (try local_iterator.next()) |v| {
+        if (std.mem.eql(u8, version_str, v.name)) {
+            break v;
+        }
+    } else null;
+
+    if (installed_version == null) {
+        try stderr.writeAll("Version not found in index.\n");
+        try stderr.print("Use 'zi install {s}' to install it.\n", .{version_str});
+        return;
+    }
+
+    const full_version_str = installed_version.?.name;
+    var install_dir = zi.local.openInstallDir(allocator, full_version_str, .{ .iterate = true }) catch |err| blk: {
+        if (err != error.FileNotFound) return err;
+        const new_dir = try zi.local.makeOpenInstallDir(allocator, full_version_str, .{ .iterate = true });
+        break :blk new_dir;
+    };
+    defer install_dir.close();
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    const arena_allocator = arena.allocator();
+    defer arena.deinit();
+
+    const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
+    const zls_name = if (@import("builtin").os.tag == .windows) "zls.exe" else "zls";
+    const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse {
+        try stderr.writeAll("Failed to locate zig executable.\n");
+        try stderr.writeAll("Try reinstalling using the '--force' flag.\n");
+        return;
+    };
+
+    const link_dir = try zi.local.linkDir(arena_allocator);
+    const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
+    std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false }) catch |err| {
+        if (err != error.FileNotFound) return err;
+        try stderr.writeAll("Invalid link directory.\n");
+        return;
+    };
+
+    const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse {
+        try stderr.writeAll("Failed to locate zls executable.\n");
+        try stderr.writeAll("Try reinstalling using the '--force' flag or ignoring this error using '--skip-zls'.\n");
+        return;
+    };
+    const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
+    try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
+
+    try stderr.print("Using Zig version {s}\n", .{full_version_str});
 }
 
 fn listZigVersions(
