@@ -24,6 +24,9 @@ const help_text =
     \\    -f, --force          Remove the existing download if it exists
     \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
     \\
+    \\Flags for `use` subcommand:
+    \\    --zls                Change only the ZLS version, useful for mismatching ZLS and Zig versions
+    \\
     \\Environment variables:
     \\    ZI_INSTALL_DIR       Directory to install Zig versions (default: $HOME/.zi)
     \\    ZI_LINK_DIR          Directory to create symlinks for the active Zig version (default: $HOME/.local/bin)
@@ -52,6 +55,7 @@ pub fn main() !void {
     var remote_flag = false;
     var skip_zls_flag = false;
     var force_flag = false;
+    var zls_flag = false;
     var subcommand: ?Subcommand = null;
     var reading_positional = false;
     var positional: ?[]const u8 = null;
@@ -78,6 +82,8 @@ pub fn main() !void {
             skip_zls_flag = true;
         } else if (std.mem.eql(u8, arg, "--force") or std.mem.eql(u8, arg, "-f")) {
             force_flag = true;
+        } else if (std.mem.eql(u8, arg, "--zls")) {
+            zls_flag = true;
         } else if (std.mem.eql(u8, arg, "ls") and subcommand == null) {
             subcommand = .ls;
         } else if (std.mem.eql(u8, arg, "use") and subcommand == null) {
@@ -111,7 +117,7 @@ pub fn main() !void {
             try installZigVersion(allocator, stderr, positional.?, force_flag, skip_zls_flag);
         },
         .use => {
-            try useZigVersion(allocator, stderr, positional);
+            try useZigVersion(allocator, stderr, positional, zls_flag);
         },
     }
 }
@@ -204,6 +210,9 @@ fn installZigVersion(
     const zls_location = try zi.local.locateExecutable(.zls, arena_allocator, install_dir) orelse {
         try stderr.writeAll("Failed to locate zls executable.\n");
         try stderr.writeAll("Try reinstalling using the '--force' flag or ignoring this error using '--skip-zls'.\n");
+        try stderr.writeAll("Alternatively, if this version has no matching zls release, use 'zi use' with the '--zls' flag to specify a different installed version.\n");
+        zls_linking_progress.end();
+        zls_install_progress.end();
         return;
     };
     const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
@@ -216,6 +225,7 @@ fn useZigVersion(
     allocator: std.mem.Allocator,
     stderr: std.io.AnyWriter,
     maybe_version_str: ?[]const u8,
+    zls_only: bool,
 ) !void {
     var local_iterator = try zi.local.iterateInstalledVersions(allocator);
     defer local_iterator.deinit();
@@ -257,28 +267,37 @@ fn useZigVersion(
 
     const zig_name = if (@import("builtin").os.tag == .windows) "zig.exe" else "zig";
     const zls_name = if (@import("builtin").os.tag == .windows) "zls.exe" else "zls";
-    const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse {
-        try stderr.writeAll("Failed to locate zig executable.\n");
-        try stderr.writeAll("Try reinstalling using the '--force' flag.\n");
-        return;
-    };
-
     const link_dir = try zi.local.linkDir(arena_allocator);
     const link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zig_name });
-    std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false }) catch |err| {
-        if (err != error.FileNotFound) return err;
-        try stderr.writeAll("Invalid link directory.\n");
-        return;
-    };
+
+    if (!zls_only) {
+        const zig_location = try zi.local.locateExecutable(.zig, arena_allocator, install_dir) orelse {
+            try stderr.writeAll("Failed to locate zig executable.\n");
+            try stderr.writeAll("Try reinstalling with 'zi install' using the '--force' flag.\n");
+            return;
+        };
+        std.fs.cwd().atomicSymLink(zig_location, link_path, .{ .is_directory = false }) catch |err| {
+            if (err != error.FileNotFound) return err;
+            try stderr.writeAll("Invalid link directory.\n");
+            return;
+        };
+    }
 
     if (try zi.local.locateExecutable(.zls, arena_allocator, install_dir)) |zls_location| {
         const zls_link_path = try std.fs.path.join(arena_allocator, &[_][]const u8{ link_dir, zls_name });
         try std.fs.cwd().atomicSymLink(zls_location, zls_link_path, .{ .is_directory = false });
-    } else {
+    } else if (!zls_only) {
         try stderr.writeAll("Warning: Unable to locate zls.\n");
+        try stderr.writeAll("If this version has a tagged zls release, try reinstalling using 'zi install' with the '--force' flag.\n");
+        try stderr.writeAll("Alternatively, specify a different zls version using this command with the '--zls' flag.\n");
+    } else {
+        try stderr.writeAll("Failed to locate zls executable.\n");
+        try stderr.writeAll("Try reinstalling with 'zi install' using the '--force' flag.\n");
+        return;
     }
 
-    try stderr.print("Using Zig version {s}\n", .{full_version_str});
+    const name = if (zls_only) "zls" else "Zig";
+    try stderr.print("Using {s} version {s}\n", .{ name, full_version_str });
 }
 
 fn listZigVersions(

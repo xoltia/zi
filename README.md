@@ -27,6 +27,10 @@ Flags for `install` subcommand:
     -f, --force          Remove the existing download if it exists
     -s, --skip-zls       Skip downloading and/or linking the ZLS executable
 
+Flags for `use` subcommand:
+    --zls                Change only the ZLS version, useful for mismatching
+                         ZLS and Zig versions
+
 Environment variables:
     ZI_INSTALL_DIR       Directory to install Zig versions
                          (default: $HOME/.zi)
