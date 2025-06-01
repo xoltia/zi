@@ -12,7 +12,8 @@ Usage:
 Subcommands:
     ls                   List Zig versions
     install <version>    Install a specific Zig version
-    use [<version>]      Switch to a specific Zig version. Uses .zirc if available and version is omitted.
+    use [version]        Switch to a specific local Zig version,
+                         using .zirc if version is omitted
 
 Flags:
     -h, --help           Print help information
