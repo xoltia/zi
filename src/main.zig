@@ -388,11 +388,29 @@ fn listAllZigVersions(
 }
 
 fn listLocalZigVersions(allocator: std.mem.Allocator, stdout: std.io.AnyWriter) !void {
-    var versions = try zi.local.iterateInstalledVersions(allocator);
+    var version_iterator = try zi.local.iterateInstalledVersions(allocator);
+    defer version_iterator.deinit();
+
+    var versions = std.ArrayList([]const u8).init(allocator);
     defer versions.deinit();
 
-    while (try versions.next()) |v| {
-        try stdout.print("{s}\n", .{v.name});
+    while (try version_iterator.next()) |v| {
+        try versions.append(v.name);
+    }
+
+    const version_slice = try versions.toOwnedSlice();
+    defer allocator.free(version_slice);
+
+    const Sort = struct {
+        fn sortFunc(_: void, lhs: []const u8, rhs: []const u8) bool {
+            return std.mem.order(u8, lhs, rhs) == .gt; // Descending order
+        }
+    };
+
+    std.mem.sort([]const u8, version_slice, {}, Sort.sortFunc);
+
+    for (version_slice) |v| {
+        try stdout.print("{s}\n", .{v});
     }
 }
 
