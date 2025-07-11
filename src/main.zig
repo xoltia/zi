@@ -72,7 +72,7 @@ pub fn main() !void {
             try stderr.writeAll(help_text);
             return;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            try stdout.writeAll("zi version 0.1.4\n");
+            try stdout.writeAll("zi version 0.1.5\n");
             return;
         } else if (std.mem.eql(u8, arg, "--local") or std.mem.eql(u8, arg, "-l")) {
             local_flag = true;
