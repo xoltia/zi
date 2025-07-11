@@ -403,7 +403,9 @@ fn listLocalZigVersions(allocator: std.mem.Allocator, stdout: std.io.AnyWriter) 
 
     const Sort = struct {
         fn sortFunc(_: void, lhs: []const u8, rhs: []const u8) bool {
-            return std.mem.order(u8, lhs, rhs) == .gt; // Descending order
+            const a_semver = std.SemanticVersion.parse(lhs) catch return false;
+            const b_semver = std.SemanticVersion.parse(rhs) catch return false;
+            return a_semver.order(b_semver) != .lt; // Descending order
         }
     };
 
