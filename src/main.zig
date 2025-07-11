@@ -72,7 +72,7 @@ pub fn main() !void {
             try stderr.writeAll(help_text);
             return;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            try stdout.writeAll("zi version 0.1.4\n");
+            try stdout.writeAll("zi version 0.1.5\n");
             return;
         } else if (std.mem.eql(u8, arg, "--local") or std.mem.eql(u8, arg, "-l")) {
             local_flag = true;
@@ -388,11 +388,31 @@ fn listAllZigVersions(
 }
 
 fn listLocalZigVersions(allocator: std.mem.Allocator, stdout: std.io.AnyWriter) !void {
-    var versions = try zi.local.iterateInstalledVersions(allocator);
+    var version_iterator = try zi.local.iterateInstalledVersions(allocator);
+    defer version_iterator.deinit();
+
+    var versions = std.ArrayList([]const u8).init(allocator);
     defer versions.deinit();
 
-    while (try versions.next()) |v| {
-        try stdout.print("{s}\n", .{v.name});
+    while (try version_iterator.next()) |v| {
+        try versions.append(v.name);
+    }
+
+    const version_slice = try versions.toOwnedSlice();
+    defer allocator.free(version_slice);
+
+    const Sort = struct {
+        fn sortFunc(_: void, lhs: []const u8, rhs: []const u8) bool {
+            const a_semver = std.SemanticVersion.parse(lhs) catch return false;
+            const b_semver = std.SemanticVersion.parse(rhs) catch return false;
+            return a_semver.order(b_semver) != .lt; // Descending order
+        }
+    };
+
+    std.mem.sort([]const u8, version_slice, {}, Sort.sortFunc);
+
+    for (version_slice) |v| {
+        try stdout.print("{s}\n", .{v});
     }
 }
 
