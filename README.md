@@ -3,6 +3,24 @@
 zi is a basic tool that helps you install specific versions of Zig from the official index.
 It can also install ZLS, either from GitHub releases or by building it from source for use with the latest Zig version.
 
+## Examples
+Basic usage: installs from any mirror, first checking if a local install already exists.
+```
+zi install 0.14.0
+```
+
+Force install (maybe necessary if a previous install failed) Zig from the Mach Engine mirror, without trying to also download ZLS.
+```
+zi install 0.14.1 -f --mirror=https://pkg.machengine.org/zig --skip-zls
+```
+
+Mismatched Zig/ZLS versions. Useful if there is no matching ZLS version (such as with 0.14.1).
+```
+zi install 0.14.0
+zi install 0.14.1 --skip-zls
+zi use 0.14.0 --zls
+```
+
 ## Usage
 
 ```
@@ -44,4 +62,3 @@ It can also install ZLS, either from GitHub releases or by building it from sour
                           (default: $HOME/.local/bin)
  
 ```
-
