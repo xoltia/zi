@@ -9,6 +9,7 @@ const help_text =
     \\
     \\Subcommands:
     \\    ls                   List Zig versions
+    \\    ls-mirrors           List available mirrors
     \\    install <version>    Install a specific remote Zig version
     \\    use [version]        Switch to a specific local Zig version, using .zirc if version is omitted
     \\
@@ -23,6 +24,9 @@ const help_text =
     \\Flags for `install` subcommand:
     \\    -f, --force          Remove the existing download if it exists
     \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
+    \\        --mirror=<url>   Use a specific mirror (must be in the community-mirrors.txt format; see https://ziglang.org/download/community-mirrors)
+    \\        --no-mirror      Download directly from ziglang.org (not recommended)
+    \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
     \\
     \\Flags for `use` subcommand:
     \\    --zls                Change only the ZLS version, useful for mismatching ZLS and Zig versions
@@ -35,6 +39,7 @@ const help_text =
 
 const Subcommand = enum {
     ls,
+    ls_mirror,
     install,
     use,
 };
@@ -56,15 +61,15 @@ pub fn main() !void {
     var skip_zls_flag = false;
     var force_flag = false;
     var zls_flag = false;
+    var no_mirror_flag = false;
     var subcommand: ?Subcommand = null;
     var reading_positional = false;
     var positional: ?[]const u8 = null;
-
-    defer if (positional) |str| allocator.free(str);
+    var mirror_option: ?[]const u8 = null;
 
     for (args[1..]) |arg| {
         if (reading_positional) {
-            positional = try allocator.dupe(u8, arg);
+            positional = arg;
             reading_positional = false;
             continue;
         }
@@ -84,8 +89,28 @@ pub fn main() !void {
             force_flag = true;
         } else if (std.mem.eql(u8, arg, "--zls")) {
             zls_flag = true;
+        } else if (std.mem.eql(u8, arg, "--no-mirror")) {
+            no_mirror_flag = true;
+        } else if (std.mem.startsWith(u8, arg, "--mirror")) {
+            if (arg.len == 8) {
+                try stderr.writeAll("zi: Missing argument value: --mirror\n");
+                try stderr.writeAll("See 'zi --help' for more information.\n");
+                return;
+            } else if (arg[8] != '=') {
+                try stderr.print("zi: Unknown argument: {s}\n", .{arg});
+                try stderr.writeAll("See 'zi --help' for more information.\n");
+                return;
+            }
+            mirror_option = arg[9..];
+            // Basic sanity check
+            if (!std.mem.startsWith(u8, mirror_option.?, "http")) {
+                try stderr.writeAll("zi: Mirror url does not start with 'http'\n");
+                return;
+            }
         } else if (std.mem.eql(u8, arg, "ls") and subcommand == null) {
             subcommand = .ls;
+        } else if (std.mem.eql(u8, arg, "ls-mirrors") and subcommand == null) {
+            subcommand = .ls_mirror;
         } else if (std.mem.eql(u8, arg, "use") and subcommand == null) {
             subcommand = .use;
             reading_positional = true;
@@ -114,10 +139,21 @@ pub fn main() !void {
                 try stderr.writeAll("See 'zi --help' for more information.\n");
                 return;
             }
-            try installZigVersion(allocator, stderr, positional.?, force_flag, skip_zls_flag);
+            try installZigVersion(
+                allocator,
+                stderr,
+                positional.?,
+                force_flag,
+                skip_zls_flag,
+                mirror_option,
+                no_mirror_flag,
+            );
         },
         .use => {
             try useZigVersion(allocator, stderr, positional, zls_flag);
+        },
+        .ls_mirror => {
+            try listMirrors(allocator, stdout);
         },
     }
 }
@@ -128,6 +164,8 @@ fn installZigVersion(
     version_str: []const u8,
     force: bool,
     skip_zls: bool,
+    mirror_option: ?[]const u8,
+    no_mirror: bool,
 ) !void {
     const progress = std.Progress.start(.{});
     defer progress.end();
@@ -162,7 +200,39 @@ fn installZigVersion(
             try install_dir.deleteTree(entry.name);
         const zig_download_progress = zig_install_progress.start("Downloading", 0);
         defer zig_download_progress.end();
-        try zi.remote.downloadZig(allocator, &client, version_info, install_dir, zig_download_progress);
+
+        // Must hold this for as long as mirror string is needed.
+        var mirrors: ?zi.remote.MirrorList = null;
+        var mirror: ?[]const u8 = null;
+
+        if (mirror_option) |m| {
+            try stderr.print("Using specified mirror: {s}\n", .{m});
+            mirror = m;
+        } else if (!no_mirror) {
+            mirrors = try zi.remote.fetchZigMirrors(allocator, &client);
+            if (mirrors.?.items.len > 0) {
+                var prng = std.Random.DefaultPrng.init(@bitCast(std.time.milliTimestamp()));
+                const random = prng.random();
+                const random_mirror = random.intRangeLessThan(usize, 0, mirrors.?.items.len);
+                mirror = mirrors.?.items[random_mirror];
+                try stderr.print("Using random mirror: {s}\n", .{mirror.?});
+            }
+        }
+        defer if (mirrors) |mirror_list| mirror_list.deinit();
+
+        // TODO: Try additional mirrors if random one doesn't work
+        zi.remote.downloadZig(
+            allocator,
+            &client,
+            version_info,
+            mirror,
+            install_dir,
+            zig_download_progress,
+        ) catch |err| {
+            if (err == error.SignatureVerificationFailed and mirror != null)
+                try stderr.print("Warning: signature verification failed for mirror: {s}\n", .{mirror.?});
+            return err;
+        };
     }
 
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -313,6 +383,20 @@ fn listZigVersions(
         try listRemoteZigVersions(allocator, stdout);
     } else {
         try listAllZigVersions(allocator, stdout, color);
+    }
+}
+
+fn listMirrors(
+    allocator: std.mem.Allocator,
+    stdout: std.io.AnyWriter,
+) !void {
+    var client = std.http.Client{ .allocator = allocator };
+    defer client.deinit();
+    const mirrors = try zi.remote.fetchZigMirrors(allocator, &client);
+    defer mirrors.deinit();
+    for (mirrors.items) |mirror| {
+        try stdout.writeAll(mirror);
+        try stdout.writeByte('\n');
     }
 }
 
