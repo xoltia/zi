@@ -23,7 +23,6 @@ const help_text =
     \\
     \\Flags for `install` subcommand:
     \\    -f, --force          Remove the existing download if it exists
-    \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
     \\        --mirror=<url>   Use a specific mirror (must be in the community-mirrors.txt format; see https://ziglang.org/download/community-mirrors)
     \\        --no-mirror      Download directly from ziglang.org (not recommended)
     \\    -s, --skip-zls       Skip downloading and/or linking the ZLS executable
